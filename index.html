@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+  <title>poopy</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            text-align: center;
+            font-family: Arial, sans-serif;
+            background: #f0f0f0;
+        }
+
+        h1 {
+            padding: 10px 0 4px;
+            font-size: 22px;
+        }
+
+        .top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 14px;
+            background: #fff;
+            border-bottom: 1px solid #ccc;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+
+        .timer-area {
+            font-size: 15px;
+        }
+
+        .hint {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .main-layout {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 16px;
+            padding: 12px;
+        }
+
+        canvas {
+            border: 2px solid black;
+            background: #111;
+            display: block;
+        }
+
+        /* LEADERBOARD */
+        .leaderboard {
+            width: 200px;
+            background: #fff;
+            border: 2px solid black;
+            text-align: left;
+            font-size: 13px;
+            flex-shrink: 0;
+        }
+
+        .lb-header {
+            background: #222;
+            color: #fff;
+            padding: 7px 10px;
+            font-weight: bold;
+            font-size: 14px;
+            text-align: center;
+            letter-spacing: 1px;
+        }
+
+        .lb-col-headers {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            padding: 4px 8px;
+            font-size: 11px;
+            color: #888;
+            border-bottom: 1px solid #ddd;
+            font-weight: bold;
+        }
+
+        .lb-entry {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            padding: 5px 8px;
+            border-bottom: 1px solid #eee;
+            align-items: center;
+        }
+
+        .lb-entry:nth-child(1) {
+            background: #fffbe6;
+        }
+
+        .lb-entry:nth-child(2) {
+            background: #f8f8f8;
+        }
+
+        .lb-entry:nth-child(3) {
+            background: #fdf5ee;
+        }
+
+        .lb-rank {
+            font-weight: bold;
+            color: #555;
+        }
+
+        .lb-entry:nth-child(1) .lb-rank {
+            color: #c8a000;
+        }
+
+        .lb-entry:nth-child(2) .lb-rank {
+            color: #888;
+        }
+
+        .lb-entry:nth-child(3) .lb-rank {
+            color: #a0622a;
+        }
+
+        .lb-size {
+            color: #444;
+        }
+
+        .lb-time {
+            font-weight: bold;
+            color: #000;
+            text-align: right;
+            padding-right: 4px;
+        }
+
+        .lb-empty {
+            padding: 16px 10px;
+            color: #aaa;
+            font-size: 12px;
+            text-align: center;
+            line-height: 1.7;
+        }
+
+        .lb-clear {
+            width: 100%;
+            padding: 5px;
+            background: #f5f5f5;
+            border: none;
+            border-top: 1px solid #ddd;
+            font-size: 11px;
+            color: #888;
+            cursor: pointer;
+        }
+
+        .lb-clear:hover {
+            background: #ffe0e0;
+            color: #c00;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Maze Speed Game</h1>
+
+    <div class="top-bar">
+        <div class="controls">
+            <label for="sizeSlider"><strong>Maze Size:</strong></label>
+            <input type="range" id="sizeSlider" min="5" max="30" value="10">
+            <span id="sizeDisplay">10×10</span>
+        </div>
+        <div class="timer-area">
+            Time: <strong><span id="timer">0.00</span>s</strong>
+        </div>
+        <div class="hint">Press <strong>R</strong> for new maze &nbsp;|&nbsp; WASD / Arrow keys to move</div>
+    </div>
+
+    <div class="main-layout">
+        <canvas id="mazeCanvas"></canvas>
+
+        <div class="leaderboard">
+            <div class="lb-header">🏆 Leaderboard</div>
+            <div class="lb-col-headers">
+                <span>Size</span><span style="text-align:right;padding-right:4px">Best Time</span>
+            </div>
+            <div id="lbEntries">
+                <div class="lb-empty">No runs yet.<br>Finish the maze<br>to record a time!</div>
+            </div>
+            <button class="lb-clear" onclick="clearLeaderboard()">Clear Scores</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("mazeCanvas");
+        const ctx = canvas.getContext("2d");
+
+        let cols = 10, rows = 10, size;  // 'size' = cell pixel size (matches provided code)
+        let grid = [];
+        let player, goal;
+        let startTime = null, timerInterval = null;
+        let finished = false;
+        let generating = false;
+        let rafId = null;
+        let leaderboard = JSON.parse(localStorage.getItem('mazeLeaderboard') || '[]');
+
+        // ── Cell — exactly as provided ──────────────────────────────────────────
+        class Cell {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.walls = [true, true, true, true]; // top, right, bottom, left
+                this.visited = false;
+            }
+
+            draw() {
+                const x = this.x * size;
+                const y = this.y * size;
+
+                ctx.strokeStyle = "black";
+
+                if (this.walls[0]) line(x, y, x + size, y); // top
+                if (this.walls[1]) line(x + size, y, x + size, y + size); // right
+                if (this.walls[2]) line(x + size, y + size, x, y + size); // bottom
+                if (this.walls[3]) line(x, y + size, x, y); // left
+
+                if (this.visited) {
+                    ctx.fillStyle = "#dff0ff"; // light blue tint shows generation path
+                    ctx.fillRect(x + 1, y + 1, size - 2, size - 2);
+                }
+            }
+        }
+
+        function line(x1, y1, x2, y2) {
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        }
+
+        function index(x, y) {
+            if (x < 0 || y < 0 || x >= cols || y >= rows) return -1;
+            return x + y * cols;
+        }
+
+        function removeWalls(a, b) {
+            const dx = a.x - b.x;
+            const dy = a.y - b.y;
+
+            if (dx === 1) {
+                a.walls[3] = false;
+                b.walls[1] = false;
+            } else if (dx === -1) {
+                a.walls[1] = false;
+                b.walls[3] = false;
+            }
+
+            if (dy === 1) {
+                a.walls[0] = false;
+                b.walls[2] = false;
+            } else if (dy === -1) {
+                a.walls[2] = false;
+                b.walls[0] = false;
+            }
+        }
+
+        function getNeighbors(cell) {
+            const neighbors = [];
+
+            const top = grid[index(cell.x, cell.y - 1)];
+            const right = grid[index(cell.x + 1, cell.y)];
+            const bottom = grid[index(cell.x, cell.y + 1)];
+            const left = grid[index(cell.x - 1, cell.y)];
+
+            if (top && !top.visited) neighbors.push(top);
+            if (right && !right.visited) neighbors.push(right);
+            if (bottom && !bottom.visited) neighbors.push(bottom);
+            if (left && !left.visited) neighbors.push(left);
+
+            return neighbors;
+        }
+
+        // ── Setup ────────────────────────────────────────────────────────────────
+        function setupMaze() {
+            // Cancel any running animation
+            if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+
+            finished = false;
+            generating = true;
+            resetTimer();
+
+            size = Math.floor(500 / Math.max(cols, rows));
+            canvas.width = cols * size;
+            canvas.height = rows * size;
+            canvas.style.background = "#fff";
+
+            // Build flat grid — exactly as provided
+            grid = [];
+            for (let y = 0; y < rows; y++) {
+                for (let x = 0; x < cols; x++) {
+                    grid.push(new Cell(x, y));
+                }
+            }
+
+            // Mark start as visited so generation begins there
+            let current = grid[0];
+            current.visited = true;
+
+            const stack = [];
+
+            // ── Animated generation loop — provided draw() logic ─────────────
+            // Steps per frame: higher = faster snake animation
+            const STEPS_PER_FRAME = Math.max(1, Math.floor(cols * rows / 40));
+
+            function drawGeneration() {
+                // Advance multiple steps before redrawing
+                for (let i = 0; i < STEPS_PER_FRAME; i++) {
+                    const neighbors = getNeighbors(current);
+                    if (neighbors.length > 0) {
+                        const next = neighbors[Math.floor(Math.random() * neighbors.length)];
+                        stack.push(current);
+                        removeWalls(current, next);
+                        current = next;
+                        current.visited = true;
+                    } else if (stack.length > 0) {
+                        current = stack.pop();
+                    } else {
+                        // Generation complete
+                        grid.forEach(c => c.visited = false);
+                        addExtraOpenings();
+                        generating = false;
+                        player = { x: 0, y: 0 };
+                        goal = { x: cols - 1, y: rows - 1 };
+                        drawGame();
+                        return;
+                    }
+                }
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.lineWidth = 2;
+
+                grid.forEach(cell => cell.draw());
+
+                // Highlight current frontier cell in orange
+                ctx.fillStyle = "orange";
+                ctx.fillRect(current.x * size + 1, current.y * size + 1, size - 2, size - 2);
+
+                rafId = requestAnimationFrame(drawGeneration);
+
+            }
+
+            rafId = requestAnimationFrame(drawGeneration);
+        }
+
+        // ── Extra openings for multiple routes ──────────────────────────────────
+        function addExtraOpenings() {
+            const extras = Math.floor(cols * rows * 0.12);
+            let added = 0, attempts = 0;
+            while (added < extras && attempts < extras * 10) {
+                attempts++;
+                const x = Math.floor(Math.random() * (cols - 1));
+                const y = Math.floor(Math.random() * (rows - 1));
+                const goRight = Math.random() < 0.5;
+                const a = grid[index(x, y)];
+                const b = goRight ? grid[index(x + 1, y)] : grid[index(x, y + 1)];
+                const wallA = goRight ? 1 : 2; // right : bottom
+                const wallB = goRight ? 3 : 0; // left  : top
+                if (a.walls[wallA]) {
+                    a.walls[wallA] = false;
+                    b.walls[wallB] = false;
+                    added++;
+                }
+            }
+        }
+
+        // ── Game drawing ─────────────────────────────────────────────────────────
+        function drawGame() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.lineWidth = 2;
+
+            grid.forEach(cell => cell.draw());
+
+            // Goal — green square
+            ctx.fillStyle = "green";
+            ctx.fillRect(goal.x * size + 4, goal.y * size + 4, size - 8, size - 8);
+
+            // Player — red circle
+            ctx.fillStyle = "red";
+            ctx.beginPath();
+            ctx.arc(
+                player.x * size + size / 2,
+                player.y * size + size / 2,
+                size / 3.5,
+                0, Math.PI * 2
+            );
+            ctx.fill();
+        }
+
+        // ── Movement ─────────────────────────────────────────────────────────────
+        function move(dir) {
+            if (generating || finished) return;
+
+            const cell = grid[index(player.x, player.y)];
+            let moved = false;
+
+            // walls = [top(0), right(1), bottom(2), left(3)]
+            if (dir === 'up' && !cell.walls[0]) { player.y--; moved = true; }
+            else if (dir === 'right' && !cell.walls[1]) { player.x++; moved = true; }
+            else if (dir === 'down' && !cell.walls[2]) { player.y++; moved = true; }
+            else if (dir === 'left' && !cell.walls[3]) { player.x--; moved = true; }
+
+            if (!moved) return;
+
+            if (!startTime) {
+                startTime = Date.now();
+                timerInterval = setInterval(updateTimer, 10);
+            }
+
+            drawGame();
+
+            if (player.x === goal.x && player.y === goal.y) {
+                finished = true;
+                clearInterval(timerInterval);
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+                document.getElementById("timer").textContent = elapsed;
+
+                setTimeout(() => {
+                    const key = `${cols}×${rows}`;
+                    const existing = leaderboard.find(e => e.size === key);
+                    if (!existing || parseFloat(elapsed) < existing.time) {
+                        leaderboard = leaderboard.filter(e => e.size !== key);
+                        leaderboard.push({ size: key, time: parseFloat(elapsed) });
+                        leaderboard.sort((a, b) => {
+                            const [ac, ar] = a.size.split('×').map(Number);
+                            const [bc, br] = b.size.split('×').map(Number);
+                            return ac * ar - bc * br;
+                        });
+                    }
+                    localStorage.setItem('mazeLeaderboard', JSON.stringify(leaderboard));
+                    renderLeaderboard();
+                    setupMaze();
+                }, 80);
+            }
+        }
+
+        // ── Timer ────────────────────────────────────────────────────────────────
+        function updateTimer() {
+            document.getElementById("timer").textContent =
+                ((Date.now() - startTime) / 1000).toFixed(2);
+        }
+
+        function resetTimer() {
+            clearInterval(timerInterval);
+            startTime = null;
+            timerInterval = null;
+            document.getElementById("timer").textContent = "0.00";
+        }
+
+        function renderLeaderboard() {
+            const el = document.getElementById("lbEntries");
+            if (!leaderboard.length) {
+                el.innerHTML = '<div class="lb-empty">No runs yet.<br>Finish the maze<br>to record a time!</div>';
+                return;
+            }
+            el.innerHTML = leaderboard.map(e =>
+                `<div class="lb-entry">
+            <span class="lb-size">${e.size}</span>
+            <span class="lb-time">${e.time.toFixed(2)}s</span>
+        </div>`
+            ).join('');
+        }
+
+        function clearLeaderboard() {
+            leaderboard = [];
+            localStorage.removeItem('mazeLeaderboard');
+            renderLeaderboard();
+        }
+
+        // ── Input ────────────────────────────────────────────────────────────────
+        document.addEventListener("keydown", (e) => {
+            switch (e.key) {
+                case "ArrowUp": case "w": case "W": e.preventDefault(); move('up'); break;
+                case "ArrowDown": case "s": case "S": e.preventDefault(); move('down'); break;
+                case "ArrowLeft": case "a": case "A": e.preventDefault(); move('left'); break;
+                case "ArrowRight": case "d": case "D": e.preventDefault(); move('right'); break;
+                case "r": case "R": setupMaze(); break;
+            }
+        });
+
+        const slider = document.getElementById("sizeSlider");
+        slider.addEventListener("input", () => {
+            cols = rows = parseInt(slider.value);
+            document.getElementById("sizeDisplay").textContent = `${cols}×${rows}`;
+            setupMaze();
+        });
+
+        // ── Init ─────────────────────────────────────────────────────────────────
+        renderLeaderboard();
+        setupMaze();
+    </script>
+</body>
+
+</html>
